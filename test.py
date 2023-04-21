@@ -1,5 +1,3 @@
-from fastparquet import ParquetWriter
-
 def process_file(input_file, output_file, index_col, batch_size=250000):
     try:
         # Get total number of rows in the input file
@@ -8,9 +6,6 @@ def process_file(input_file, output_file, index_col, batch_size=250000):
 
         # Calculate number of batches to process
         num_batches = (total_rows // batch_size) + (1 if total_rows % batch_size > 0 else 0)
-
-        # Initialize the ParquetWriter
-        writer = None
 
         # Iterate through batches and write the index column data
         for batch_num in range(num_batches):
@@ -26,14 +21,7 @@ def process_file(input_file, output_file, index_col, batch_size=250000):
 
             # Write the index column data to the output file
             if not data.empty:
-                if writer is None:
-                    writer = ParquetWriter(output_file, data, compression='SNAPPY', write_options=dict(compression='snappy'))
-                else:
-                    writer.write(data)
-
-        # Close the ParquetWriter
-        if writer is not None:
-            writer.close()
+                fp_write(output_file, data, compression='SNAPPY', append=batch_num > 0, write_options=dict(compression='snappy'))
 
         logging.info(f"Successfully created output file: {output_file}")
 
