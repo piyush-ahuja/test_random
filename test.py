@@ -1,42 +1,42 @@
-from fastparquet import write as fp_write
+from fastparquet import ParquetWriter
 
-from pyarrow.parquet import ParquetDataset
-
-def create_subsets(keys_file, input_files, output_files, batch_size=250000):
+def process_file(input_file, output_file, index_col, batch_size=250000):
     try:
-        logging.info(f"Reading keys from file: {keys_file}")
-        keys_data = pd.read_parquet(keys_file)
-        keys_set = set(keys_data['cpf'])
+        # Get total number of rows in the input file
+        total_rows = pq.read_metadata(input_file).num_rows
+        logging.info(f"Total rows: {total_rows}")
 
-        for input_file, output_file in zip(input_files, output_files):
-            logging.info(f"Creating subset for file: {input_file}")
+        # Calculate number of batches to process
+        num_batches = (total_rows // batch_size) + (1 if total_rows % batch_size > 0 else 0)
 
-            # Get the ParquetDataset and total number of row groups in the input file
-            dataset = ParquetDataset(input_file)
-            total_row_groups = len(dataset.pieces)
-            logging.info(f"Total row groups: {total_row_groups}")
+        # Initialize the ParquetWriter
+        writer = None
 
-            # Calculate number of batches to process
-            num_batches = (total_row_groups // batch_size) + (1 if total_row_groups % batch_size > 0 else 0)
+        # Iterate through batches and write the index column data
+        for batch_num in range(num_batches):
+            start_row = batch_num * batch_size
+            end_row = min((batch_num + 1) * batch_size, total_rows)
+            logging.info(f"Processing batch {batch_num + 1} of {num_batches} (rows {start_row} to {end_row})")
 
-            # Iterate through batches and write the records containing cpf values found in keys_vivo.pq
-            for batch_num in range(num_batches):
-                start_row_group = batch_num * batch_size
-                end_row_group = min((batch_num + 1) * batch_size, total_row_groups)
-                logging.info(f"Processing batch {batch_num + 1} of {num_batches} (row groups {start_row_group} to {end_row_group})")
+            # Read the current batch of rows from the input file
+            data = pq.read_table(input_file, skip_rows=start_row, num_rows=batch_size).to_pandas()
 
-                # Read the current batch of row groups from the input file
-                data = dataset.read(columns=['cpf'], row_groups=range(start_row_group, end_row_group)).to_pandas()
+            # Select only the index column
+            data = data[[index_col]]
 
-                # Filter the records containing cpf values found in keys_vivo.pq
-                filtered_data = data[data['cpf'].isin(keys_set)]
+            # Write the index column data to the output file
+            if not data.empty:
+                if writer is None:
+                    writer = ParquetWriter(output_file, data, compression='SNAPPY', write_options=dict(compression='snappy'))
+                else:
+                    writer.write(data)
 
-                # Write the filtered records to the output file
-                if not filtered_data.empty:
-                    fp_write(output_file, filtered_data, compression='SNAPPY', append=batch_num > 0, write_options=dict(compression='snappy'))
+        # Close the ParquetWriter
+        if writer is not None:
+            writer.close()
 
-            logging.info(f"Successfully created subset for file: {input_file}")
+        logging.info(f"Successfully created output file: {output_file}")
 
     except Exception as e:
-        logging.error(f"Error creating subsets: {str(e)}")
+        logging.error(f"Error processing file: {str(e)}")
         raise
