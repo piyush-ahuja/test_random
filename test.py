@@ -1,23 +1,23 @@
+from pyarrow.parquet import ParquetDataset
+
 def process_file(input_file, output_file, index_col, batch_size=250000):
     try:
-        # Get total number of rows in the input file
-        total_rows = pq.read_metadata(input_file).num_rows
-        logging.info(f"Total rows: {total_rows}")
+        # Get the ParquetDataset and total number of row groups in the input file
+        dataset = ParquetDataset(input_file)
+        total_row_groups = len(dataset.pieces)
+        logging.info(f"Total row groups: {total_row_groups}")
 
         # Calculate number of batches to process
-        num_batches = (total_rows // batch_size) + (1 if total_rows % batch_size > 0 else 0)
+        num_batches = (total_row_groups // batch_size) + (1 if total_row_groups % batch_size > 0 else 0)
 
         # Iterate through batches and write the index column data
         for batch_num in range(num_batches):
-            start_row = batch_num * batch_size
-            end_row = min((batch_num + 1) * batch_size, total_rows)
-            logging.info(f"Processing batch {batch_num + 1} of {num_batches} (rows {start_row} to {end_row})")
+            start_row_group = batch_num * batch_size
+            end_row_group = min((batch_num + 1) * batch_size, total_row_groups)
+            logging.info(f"Processing batch {batch_num + 1} of {num_batches} (row groups {start_row_group} to {end_row_group})")
 
-            # Read the current batch of rows from the input file
-            data = pq.read_table(input_file, skip_rows=start_row, num_rows=batch_size).to_pandas()
-
-            # Select only the index column
-            data = data[[index_col]]
+            # Read the current batch of row groups from the input file
+            data = dataset.read(columns=[index_col], row_groups=range(start_row_group, end_row_group)).to_pandas()
 
             # Write the index column data to the output file
             if not data.empty:
