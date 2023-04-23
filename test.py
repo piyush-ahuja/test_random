@@ -1,30 +1,60 @@
-from pyarrow.parquet import ParquetDataset
+import os
+import logging
+import unittest
+from typing import List
+import pandas as pd
 
-def process_file(input_file, output_file, index_col, batch_size=250000):
-    try:
-        # Get the ParquetDataset and total number of row groups in the input file
-        dataset = ParquetDataset(input_file)
-        total_row_groups = len(dataset.pieces)
-        logging.info(f"Total row groups: {total_row_groups}")
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-        # Calculate number of batches to process
-        num_batches = (total_row_groups // batch_size) + (1 if total_row_groups % batch_size > 0 else 0)
+class ParquetProcessor:
 
-        # Iterate through batches and write the index column data
-        for batch_num in range(num_batches):
-            start_row_group = batch_num * batch_size
-            end_row_group = min((batch_num + 1) * batch_size, total_row_groups)
-            logging.info(f"Processing batch {batch_num + 1} of {num_batches} (row groups {start_row_group} to {end_row_group})")
+    @staticmethod
+    def count_zero_indexes(file_path: str) -> int:
+        try:
+            logging.info(f"Processing file: {file_path}")
+            df = pd.read_parquet(file_path)
+            count = df[df['index'] == "00000000000"].shape[0]
+            logging.info(f"Count of zero indexes in file {file_path}: {count}")
+            return count
+        except Exception as e:
+            logging.error(f"Error processing file {file_path}: {e}")
+            return -1
 
-            # Read the current batch of row groups from the input file
-            data = dataset.read(columns=[index_col], row_groups=range(start_row_group, end_row_group)).to_pandas()
+    @staticmethod
+    def process_files(files: List[str]) -> List[int]:
+        counts = []
+        for file_path in files:
+            count = ParquetProcessor.count_zero_indexes(file_path)
+            if count != -1:
+                counts.append(count)
+        return counts
 
-            # Write the index column data to the output file
-            if not data.empty:
-                fp_write(output_file, data, compression='SNAPPY', append=batch_num > 0, write_options=dict(compression='snappy'))
+class TestParquetProcessor(unittest.TestCase):
 
-        logging.info(f"Successfully created output file: {output_file}")
+    def test_count_zero_indexes(self):
+        test_file = "test_parquet_file.parquet"
+        df = pd.DataFrame({"index": ["00000000000", "1", "2", "00000000000", "4"]})
+        df.to_parquet(test_file)
 
-    except Exception as e:
-        logging.error(f"Error processing file: {str(e)}")
-        raise
+        processor = ParquetProcessor()
+        count = processor.count_zero_indexes(test_file)
+        os.remove(test_file)
+        self.assertEqual(count, 2)
+
+    def test_process_files(self):
+        test_file1 = "test_parquet_file1.parquet"
+        test_file2 = "test_parquet_file2.parquet"
+        df1 = pd.DataFrame({"index": ["00000000000", "1", "2", "00000000000", "4"]})
+        df2 = pd.DataFrame({"index": ["00000000000", "1", "2", "3", "4"]})
+        df1.to_parquet(test_file1)
+        df2.to_parquet(test_file2)
+
+        processor = ParquetProcessor()
+        counts = processor.process_files([test_file1, test_file2])
+        os.remove(test_file1)
+        os.remove(test_file2)
+        self.assertEqual(counts, [2, 1])
+
+if __name__ == "__main__":
+    unittest.main(argv=['first-arg-is-ignored'], exit=False)
